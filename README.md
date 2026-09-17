@@ -28,13 +28,13 @@ All commands below are run from the repo root.
     source .venv/bin/activate
     uv pip install -e external/lerobot
     uv pip install -e external/jepa-wms
-    uv pip install numpy pandas scipy torch draccus
+    uv pip install numpy pandas scipy torch draccus lerobot[dataset,placo-dep] h5py
 
 ## Data pipeline
 
 **1. Download the raw LeRobot dataset**
 
-    python external/lerobot-dataset-to-HDF5/scripts/download_lerobot_dataset.py \
+    python external/lerobot-dataset-to-HDF5/scripts/download_lerobot_datasets.py \
         --repo_ids "[Flimdejong/block_or_pen]" \
         --datasets_dir data
 
@@ -42,7 +42,7 @@ Downloads to `data/raw/Flimdejong/block_or_pen/`.
 
 **2. Convert joint-space actions to 7D EE-space deltas**
 
-    python convert_dataset.py --repo-id Flimdejong/block_or_pen \
+    python scripts/convert_dataset.py --repo-id Flimdejong/block_or_pen \
         --datasets-dir data
 
 Overwrites `action` in place and patches `meta/info.json` / `meta/stats.json` to match.
@@ -54,7 +54,6 @@ This step refuses to re-run on a dataset that's already been converted.
         --repo_id Flimdejong/block_or_pen \
         --datasets_dir data \
         --raw_subdir raw \
-        --hdf5_subdir hdf5 \
-        --splits '["train"]'
+        --hdf5_subdir hdf5
 
 Writes to `data/hdf5/Flimdejong/block_or_pen/`.
