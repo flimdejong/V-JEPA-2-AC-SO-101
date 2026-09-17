@@ -1,2 +1,16 @@
 [submodule "jepa-wms"]
+	path = external/jepa-wms
+	url = https://github.com/facebookresearch/jepa-wms.git
 	ignore = dirty
+
+[submodule "lerobot"]
+	path = external/lerobot
+	url = https://github.com/huggingface/lerobot.git
+
+[submodule "lerobot-dataset-to-HDF5"]
+	path = external/lerobot-dataset-to-HDF5
+	url = https://github.com/tanguy-pauwels/lerobot-dataset-to-HDF5.git
+
+[submodule "SO-ARM100"]
+	path = external/SO-ARM100
+	url = https://github.com/TheRobotStudio/SO-ARM100.git
