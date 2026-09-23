@@ -50,7 +50,7 @@ MOTOR_NAMES = [
     "wrist_roll",
     "gripper",
 ]
-DELTA_LABELS = ["dx", "dy", "dz", "d_roll", "d_pitch", "d_yaw", "d_gripper"]
+DELTA_LABELS = ["dx", "dy", "dz", "d_roll", "d_pitch", "d_yaw", "gripper"] # Gripper is absolute, for LIBERO
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -155,13 +155,13 @@ def compute_ee_delta_row(pose_state: dict, pose_action: dict) -> np.ndarray:
     rotation_action = R.from_rotvec(
         [pose_action["ee.wx"], pose_action["ee.wy"], pose_action["ee.wz"]]
     )
-    rotation_delta = rotation_state.inv() * rotation_action
+    rotation_delta = rotation_action * rotation_state.inv() # In base frame
     delta_euler = rotation_delta.as_euler("xyz", degrees=False)
 
-    # Gripper delta. Lerobot goes from 0-100, JEPA expects 0-1
-    delta_gripper = (pose_action["ee.gripper_pos"] - pose_state["ee.gripper_pos"])/100
+    # Gripper . Lerobot goes from 0-100, JEPA/Lingbot-VA expects 0-1
+    gripper = np.clip(pose_action["ee.gripper_pos"] / 100.0, 0.0, 1.0)
 
-    return np.concatenate([delta_position, delta_euler, [delta_gripper]]).astype(np.float32)
+    return np.concatenate([delta_position, delta_euler, [gripper]]).astype(np.float32)
 
 def compute_deltas_for_file(
     parquet_path: Path, motor_names: list[str], fk_processor
@@ -225,30 +225,30 @@ def patch_info_json(raw_root: Path) -> None:
     print(f"  patched {info_path}")
 
 
-def patch_stats_json(raw_root: Path, all_deltas: np.ndarray) -> None:
-    """
-    Update meta/stats.json's 'action' entry with mean/std/min/max computed
-    from the actual 7D deltas just written, across all parquet files.
-    """
-    stats_path = raw_root / "meta" / "stats.json"
-    if not stats_path.exists():
-        print(f"  No {stats_path} found, skipping (nothing to update).")
-        return
+# def patch_stats_json(raw_root: Path, all_deltas: np.ndarray) -> None:
+#     """
+#     Update meta/stats.json's 'action' entry with mean/std/min/max computed
+#     from the actual 7D deltas just written, across all parquet files.
+#     """
+#     stats_path = raw_root / "meta" / "stats.json"
+#     if not stats_path.exists():
+#         print(f"  No {stats_path} found, skipping (nothing to update).")
+#         return
 
-    stats = json.loads(stats_path.read_text())
-    stats["action"] = {
-        "mean": all_deltas.mean(axis=0).tolist(),
-        "std": all_deltas.std(axis=0).tolist(),
-        "min": all_deltas.min(axis=0).tolist(),
-        "max": all_deltas.max(axis=0).tolist(),
-    }
-    stats_path.write_text(json.dumps(stats, indent=2))
-    print(f"  patched {stats_path}")
-    print(
-        "  NOTE: verify stats.json's key names (mean/std/min/max) match this "
-        "LeRobot version's convention — some versions use different keys "
-        "(e.g. quantiles) that this script doesn't know to update."
-    )
+#     stats = json.loads(stats_path.read_text())
+#     stats["action"] = {
+#         "mean": all_deltas.mean(axis=0).tolist(),
+#         "std": all_deltas.std(axis=0).tolist(),
+#         "min": all_deltas.min(axis=0).tolist(),
+#         "max": all_deltas.max(axis=0).tolist(),
+#     }
+#     stats_path.write_text(json.dumps(stats, indent=2))
+#     print(f"  patched {stats_path}")
+#     print(
+#         "  NOTE: verify stats.json's key names (mean/std/min/max) match this "
+#         "LeRobot version's convention — some versions use different keys "
+#         "(e.g. quantiles) that this script doesn't know to update."
+#     )
 
 def already_converted(raw_root: Path) -> bool:
     info_path = raw_root / "meta" / "info.json"
@@ -294,9 +294,9 @@ def main():
 
     print("Patching metadata to match...")
     patch_info_json(raw_root)
-    patch_stats_json(raw_root, all_deltas)
+    # patch_stats_json(raw_root, all_deltas)
 
-    print(f"Done. {len(all_deltas)} rows now have 7D EE-space 'action', metadata updated.")
+    print(f"Done. {len(all_deltas)} rows now have 7D EE-space 'action'")
     print("Video files were not touched.")
 
 
