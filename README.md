@@ -62,53 +62,58 @@ Place the arm at a start pose and press `n`. The arm moves 5 cm forward, back, u
 **Redo the calibration whenever the camera is moved.**
 
 ### Usage
+
 Scripted goal (recommended for measurements). You place the arm at the start; the arm moves to the goal by itself, records it, and returns:
 
 ```bash
-python plan_dinov3.py                           # goal 5 cm forward
-python plan_dinov3.py --direction up            # goal 5 cm up
-python plan_dinov3.py --direction back --cm 3   # goal 3 cm back
+python scripts/deploy.py                           # goal 5 cm forward
+python scripts/deploy.py --direction up            # goal 5 cm up
+python scripts/deploy.py --direction back --cm 3   # goal 3 cm back
+python scripts/deploy.py --cm 0 --steps 3          # no movement: measures the noise floor of the latent distance
 ```
 
 Hand-set goal. You place the arm at the goal, then at the start:
 
 ```bash
-python plan_dinov3.py --teleop
+python scripts/deploy.py --teleop
 ```
 
 | Flag | Meaning | Default |
 |---|---|---|
 | `--direction` | `forward`, `back`, `up` or `down` | `forward` |
 | `--cm` | distance from start to goal, in cm | `5` |
+| `--steps` | number of planning steps before the run stops | `10` |
+| `--horizon` | planning horizon. The model's config uses 3; 1 is what worked on this arm | `1` |
 | `--teleop` | set the goal by hand (ignores `--direction` and `--cm`) | off |
-| `--name` | name of the saved run | `reach_<direction>_<cm>cm` or `reach_teleop` |
+| `--name` | name of the run folder | `reach_<direction>_<cm>cm` or `reach_teleop` |
 
-Press `n` to confirm a pose and `Esc` to stop the run. Keep hands out of the camera view.
+Press `n` to confirm a pose. The run stops after `--steps` steps, or earlier with `Esc`. Keep hands out of the camera view.
 
-### Output while running
+### Saved results and plots
+
+Every run gets its own folder. Repeating a command never overwrites an earlier run; a number is added to the name instead.
 
 ```
-step 2: latent L2 to goal: 0.01580
-planner wants: dx=-0.0485 dy=-0.0187 dz=+0.0142 m | rot=(...) rad | grip=-0.000
-translated to robot: dx=+0.0515 dy=+0.0000 dz=-0.0161 m
-true distance to goal: 2.9 cm [still to go: dx=+2.8 dy=+0.1 dz=-0.6 cm] | action score +0.95
+runs/
+  reach_forward_5cm/
+    data.csv       one row per step: latent distance, gripper position, goal position,
+                   true distance, planned move, action score
+    config.json    flags, model name, calibration table and goal position used
+    start.png      camera image at the first step
+    goal.png       camera image at the goal
+    final.png      camera image after the last step
+  reach_forward_5cm_2/
+    ...
 ```
 
-- **latent L2 to goal**: how different the current image is from the goal image, as the model sees it. This is what the planner minimises. On the used camera, a result of around 0.002 means the images match.
-- **planner wants**: the planned action in the model's own axes. Do not read direction from this line.
-- **translated to robot**: the same action in the robot's axes. This is what is executed (limited to 2 cm per step, or specify this yourself).
-- **true distance to goal**: gripper-to-goal distance in the x-z plane, from the joint angles. Only for evaluation.
-- **action score**: +1 if the planned move points straight at the goal, 0 if at a right angle, -1 if straight away.
-
-<!-- ### Saved results and plots
-
-Each run is saved to `runs/<name>.csv` with one row per step: latent distance, gripper position, goal position, true distance, planned move and action score.
+Plot one or more runs:
 
 ```bash
-python plot_runs.py runs/reach_forward_5cm.csv runs/reach_up_5cm.csv
+python scripts/plot_runs.py runs/reach_forward_5cm/data.csv runs/reach_up_5cm/data.csv
+python scripts/plot_runs.py runs/*/data.csv
 ```
 
-This writes `runs_plot.png` with, per run, the true distance and latent distance per step, and the gripper path in the x-z plane. It also prints a summary table. -->
+This writes `runs_plot.png` with, per run, the true distance and latent distance per step, and the gripper path in the x-z plane. It also prints a summary table.
 
 
 ## Data pipeline

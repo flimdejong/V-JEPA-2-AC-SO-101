@@ -3,6 +3,7 @@ import torch
 from scipy.spatial.transform import Rotation
 import time
 import csv
+import json
 import os
 import numpy as np
 from lerobot.cameras.opencv import OpenCVCameraConfig
@@ -51,12 +52,17 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--direction", choices=list(DIRECTIONS), default="forward")
     parser.add_argument("--cm", type=float, default=5.0)
-    parser.add_argument("--steps", type=int, default=10)
+    parser.add_argument("--steps", type=int, default=8)
+    parser.add_argument("--horizon", type=int, default=1)
     parser.add_argument("--name", default=None)
+    parser.add_argument("--max-step", type=float, default=3.0)    # cm per axis per step
     parser.add_argument("--teleop", action="store_true")     # set the goal by hand instead of a scripted move
     args = parser.parse_args()
     goal_offset = np.array(DIRECTIONS[args.direction]) * args.cm / 100
     run_name = args.name or ("reach_teleop" if args.teleop else f"reach_{args.direction}_{args.cm:g}cm")
+    run_dir, n = f"runs/{run_name}", 2
+    while os.path.exists(run_dir):
+        run_dir, n = f"runs/{run_name}_{n}", n + 1
 
     # Create the robot and follower configurations
     camera_config = {"top": OpenCVCameraConfig(index_or_path=0, width=640, height=480, fps=FPS)}
@@ -177,13 +183,20 @@ def main():
                             for f in frames]
                 return torch.stack(encs).mean(0)
 
-            def save_model_view(frame, path):
-                view = preprocessor.transform_obs_visual(frame[None, None])[0]
-                torchvision.utils.save_image(preprocessor.inverse_transform(view), path)
+            def save_frame(frame, path):
+                h, w = frame.shape[:2]
+                s = min(h, w)
+                crop = frame[(h - s) // 2:(h + s) // 2, (w - s) // 2:(w + s) // 2]     # centre square
+                img = torch.from_numpy(crop).permute(2, 0, 1).contiguous()
+                img = torchvision.transforms.functional.resize(img, [256, 256], antialias=True)
+                torchvision.io.write_png(img, path)
 
             goal_enc = encode_avg(goal_frames).detach()
-            os.makedirs("runs", exist_ok=True)
-            save_model_view(goal_frame, f"runs/{run_name}_goal.png")
+            os.makedirs(run_dir)
+            save_frame(goal_frame, f"{run_dir}/goal.png")
+            with open(f"{run_dir}/config.json", "w") as f:
+                json.dump({"args": vars(args), "model": MODEL_NAME, "response": RESPONSE.tolist(),
+                           "move_axes": MOVE_AXES, "n_avg": N_AVG, "goal_xyz": goal_xyz.tolist()}, f, indent=2)
 
             objective = ReprTargetDistMPCObjective(
                 cfg={},
@@ -195,7 +208,7 @@ def main():
             planner = CEMPlanner(
                 unroll=model.unroll,
                 action_dim=model.action_dim,
-                horizon=1,
+                horizon=args.horizon,
                 num_samples=300,
                 num_elites=10,
                 iterations=15,
@@ -251,7 +264,7 @@ def main():
                 print(f"\nstep {step}: latent L2 to goal: {dist:.5f}")
 
                 if step == 0:
-                    save_model_view(frames[0], f"runs/{run_name}_start.png")
+                    save_frame(frames[0], f"{run_dir}/start.png")
                 step += 1
 
                 result = planner.plan(z, steps_left=None)
@@ -285,8 +298,8 @@ def main():
                       f"| action score {action_score:+.2f}")
                 log_rows.append([step - 1, dist, *pos, *goal_xyz, dist_xz_cm, robot_xyz[0], robot_xyz[2], action_score])
 
-                # --- Heavy clamp for initial testing ---
-                MAX_POS_DELTA = 0.02   # meters per axis
+                # --- Clamp to protect hardware ---
+                MAX_POS_DELTA = args.max_step / 100   # meters per axis
                 MAX_ROT_DELTA = 0.1    # radians per axis (euler)
                 MAX_GRIPPER_DELTA = 0.25  # 0-1 scale, since gripper_pos is later *100
 
@@ -300,7 +313,7 @@ def main():
                     target_pose = current_pose.clone()
                 target_pose[MOVE_AXES] += delta_action[MOVE_AXES]
                 # keep the target at most 3 cm ahead of the real arm
-                target_pose[MOVE_AXES] = current_pose[MOVE_AXES] + (target_pose[MOVE_AXES] - current_pose[MOVE_AXES]).clamp(-0.03, 0.03)
+                target_pose[MOVE_AXES] = current_pose[MOVE_AXES] + (target_pose[MOVE_AXES] - current_pose[MOVE_AXES]).clamp(-MAX_POS_DELTA - 0.01, MAX_POS_DELTA + 0.01)
                 delta_action = target_pose - current_pose            # the lines below then produce target_pose
                 delta_action[6] = target_pose[6]                     # gripper: absolute, as the code below expects
 
@@ -331,12 +344,12 @@ def main():
 
         if not MOCK:
             time.sleep(1.0)
-            save_model_view(follower.get_observation()["top"], f"runs/{run_name}_final.png")
+            save_frame(follower.get_observation()["top"], f"{run_dir}/final.png")
 
     finally:
         if log_rows:
-            os.makedirs("runs", exist_ok=True)
-            path = f"runs/{run_name}.csv"
+            os.makedirs(run_dir, exist_ok=True)
+            path = f"{run_dir}/data.csv"
             with open(path, "w", newline="") as f:
                 w = csv.writer(f)
                 w.writerow(["step", "latent_l2", "x", "y", "z", "goal_x", "goal_y", "goal_z",
